@@ -47,3 +47,23 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Installer files
+*.deb
+*.exe
+*.pkg
+
+# RStudio files
+.Rproj.user/
+*.Rproj.user
+
+# renv
+renv/library/
+renv/staging/
+
+# Database
+db/*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db
