@@ -1,0 +1,31 @@
+team_id,league_id,team_name,team_name_alt,abbreviation,active
+133,1,Athletics,NA,ATH,1
+134,1,Pittsburgh Pirates,NA,PIT,1
+135,1,San Diego Padres,NA,SD,1
+136,1,Seattle Mariners,NA,SEA,1
+137,1,San Francisco Giants,NA,SF,1
+138,1,St. Louis Cardinals,NA,STL,1
+139,1,Tampa Bay Rays,NA,TB,1
+140,1,Texas Rangers,NA,TEX,1
+141,1,Toronto Blue Jays,NA,TOR,1
+142,1,Minnesota Twins,NA,MIN,1
+143,1,Philadelphia Phillies,NA,PHI,1
+144,1,Atlanta Braves,NA,ATL,1
+145,1,Chicago White Sox,NA,CWS,1
+146,1,Miami Marlins,NA,MIA,1
+147,1,New York Yankees,NA,NYY,1
+158,1,Milwaukee Brewers,NA,MIL,1
+108,1,Los Angeles Angels,NA,LAA,1
+109,1,Arizona Diamondbacks,NA,AZ,1
+110,1,Baltimore Orioles,NA,BAL,1
+111,1,Boston Red Sox,NA,BOS,1
+112,1,Chicago Cubs,NA,CHC,1
+113,1,Cincinnati Reds,NA,CIN,1
+114,1,Cleveland Guardians,NA,CLE,1
+115,1,Colorado Rockies,NA,COL,1
+116,1,Detroit Tigers,NA,DET,1
+117,1,Houston Astros,NA,HOU,1
+118,1,Kansas City Royals,NA,KC,1
+119,1,Los Angeles Dodgers,NA,LAD,1
+120,1,Washington Nationals,NA,WSH,1
+121,1,New York Mets,NA,NYM,1

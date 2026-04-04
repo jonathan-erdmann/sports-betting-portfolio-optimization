@@ -1,0 +1,6 @@
+bookmaker_name,bookmaker_key,base_url,scrape_method,active
+DraftKings,draftkings,https://sportsbook.draftkings.com,scrape,1
+FanDuel,fanduel,https://sportsbook.fanduel.com,scrape,1
+BetMGM,betmgm,https://sports.betmgm.com,scrape,1
+Caesars Sportsbook,caesars,https://sportsbook.caesars.com,scrape,1
+PointsBet,pointsbet,https://pointsbet.com,scrape,1

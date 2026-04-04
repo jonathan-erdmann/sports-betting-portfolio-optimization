@@ -1,0 +1,4 @@
+source_name,source_url,scrape_method,active,notes
+FanGraphs,https://www.fangraphs.com/standings/playoff-odds,scrape,1,Model-based win probabilities from depth chart projections
+Baseball Reference,https://www.baseball-reference.com/previews,scrape,1,Elo-based win probabilities
+MLB Stats API,https://statsapi.mlb.com,api,1,Official MLB Stats API - schedule and game data
