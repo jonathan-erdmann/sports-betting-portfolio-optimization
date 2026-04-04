@@ -67,3 +67,6 @@ db/*.sqlite
 # OS files
 .DS_Store
 Thumbs.db
+\n# Config file with API keys\nconfig/config.yml
+config/config.yml
+config/config.yml
