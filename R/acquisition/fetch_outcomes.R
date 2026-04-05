@@ -58,7 +58,10 @@ fetch_mlb_schedule <- function(iDate = Sys.Date()) {
   
   games <- parsed$dates$games[[1]]
   
-  # Filter to completed games only
+  # Update in-progress games status
+  live <- games[games$status.abstractGameState == "Live", ]
+  cat("In-progress games:", nrow(live), "\n")
+  
   final <- games[games$status.abstractGameState == "Final", ]
   
   cat("Total games:", nrow(games), "\n")
@@ -81,7 +84,7 @@ get_pending_dates <- function(iCon) {
     FROM games g
     LEFT JOIN outcomes o ON g.game_id = o.game_id
     WHERE o.outcome_id IS NULL
-      AND g.status = 'scheduled'
+      AND g.status NOT IN ('final', 'in_progress')
       AND g.game_date <= DATE('now', 'localtime')
     ORDER BY g.game_date
   ")
@@ -117,6 +120,70 @@ update_game_status <- function(iCon, iGameId,
 }
 
 # -------------------------------------------------------------
+# Helper: update in-progress games to in_progress status
+# -------------------------------------------------------------
+
+update_in_progress_games <- function(iCon, iDate,
+                                     iDebug = FALSE) {
+  
+  url <- paste0(
+    "https://statsapi.mlb.com/api/v1/schedule",
+    "?sportId=1",
+    "&date=", format(iDate, "%Y-%m-%d")
+  )
+  
+  response <- GET(url, add_headers("User-Agent" = user_agent))
+  
+  if (status_code(response) != 200) return(invisible(NULL))
+  
+  parsed <- fromJSON(
+    content(response, as = "text", encoding = "UTF-8"),
+    flatten = TRUE
+  )
+  
+  if (parsed$totalGames == 0) return(invisible(NULL))
+  
+  games <- parsed$dates$games[[1]]
+  live  <- games[games$status.abstractGameState == "Live", ]
+  
+  if (nrow(live) == 0) return(invisible(NULL))
+  
+  cat("Updating", nrow(live), "in-progress games\n")
+  
+  for (ii in seq_len(nrow(live))) {
+    
+    home_name    <- live$teams.home.team.name[ii]
+    away_name    <- live$teams.away.team.name[ii]
+    game_date    <- as.Date(live$officialDate[ii])
+    game_number  <- live$gameNumber[ii]
+    
+    home_team_id <- get_team_id(iCon, home_name)
+    away_team_id <- get_team_id(iCon, away_name)
+    
+    if (is.na(home_team_id) || is.na(away_team_id)) next
+    
+    home_abbr         <- get_team_abbr(iCon, home_team_id)
+    away_abbr         <- get_team_abbr(iCon, away_team_id)
+    canonical_game_id <- build_game_id(game_date, home_abbr,
+                                       away_abbr, game_number)
+    
+    if (iDebug) {
+      cat("  [DEBUG] Would update to in_progress:",
+          canonical_game_id, "\n")
+    } else {
+      dbExecute(iCon,
+                "UPDATE games SET status = 'in_progress'
+         WHERE game_id = ?
+           AND status  = 'scheduled'",
+                params = list(canonical_game_id)
+      )
+      cat("  Updated to in_progress:", canonical_game_id, "\n")
+    }
+  }
+  
+}
+
+# -------------------------------------------------------------
 # Main: fetch and store outcomes for all pending games
 # -------------------------------------------------------------
 
@@ -135,6 +202,9 @@ fetch_and_store_outcomes <- function(iDebug = FALSE) {
   con     <- dbConnect(RSQLite::SQLite(), db_path)
   dbExecute(con, "PRAGMA foreign_keys = ON")
   on.exit(dbDisconnect(con))
+  
+  # Update in-progress game statuses for today
+  update_in_progress_games(con, Sys.Date(), iDebug)
   
   # Get dates with pending outcomes
   pending_dates <- get_pending_dates(con)

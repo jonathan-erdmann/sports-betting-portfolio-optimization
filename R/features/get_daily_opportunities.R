@@ -385,10 +385,10 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
     order(-opportunities$expected_value), ]
   
   # Print summary
-  cat(sprintf("%-25s  %-6s  %-6s  %-6s  %-6s  %-6s  %s\n",
+  cat(sprintf("%-25s  %-6s  %-6s  %-6s  %-6s  %-6s  %-18s  %s\n",
               "Game/Team", "ML", "Mkt%", "Post%", "EV%",
-              "Kelly%", "Book"))
-  cat(rep("-", 80), "\n", sep = "")
+              "Kelly%", "Bet by", "Book"))
+  cat(rep("-", 95), "\n", sep = "")
   
   for (ii in seq_len(nrow(opportunities))) {
     
@@ -413,7 +413,20 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
     bm_display <- if (nrow(bm_name) > 0) bm_name$bookmaker_name[1] else "?"
     scaled_flag <- if (opp$scaled) "*" else ""
     
-    cat(sprintf("%-25s  %+5d  %5.1f%%  %5.1f%%  %5.1f%%  %5.2f%%%s  %s\n",
+    # Compute bet by time
+    game_time_posix <- as.POSIXct(
+      dbGetQuery(con, "SELECT game_time FROM games
+                 WHERE game_id = ?",
+                 params = list(opp$game_id))$game_time,
+      format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"
+    )
+    bet_by <- format(
+      game_time_posix - closing_window * 3600,
+      "%H:%M CDT",
+      tz = "America/Chicago"
+    )
+    
+    cat(sprintf("%-25s  %+5d  %5.1f%%  %5.1f%%  %5.1f%%  %5.2f%%%s  %-18s  %s\n",
                 substr(team_name, 1, 25),
                 opp$moneyline,
                 opp$implied_prob_fair * 100,
@@ -421,6 +434,7 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
                 opp$expected_value * 100,
                 opp$kelly_fractional * 100,
                 scaled_flag,
+                bet_by,
                 bm_display
     ))
     

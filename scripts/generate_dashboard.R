@@ -499,10 +499,14 @@ build_status_panel <- function(con, iDate) {
 
 generate_dashboard_page <- function(con, iDate, iRunTime) {
   
+  config         <- yaml::read_yaml(here("config", "config.yml"))
+  closing_window <- config$feature_engineering$closing_window_hours
+  
   # Fetch today's opportunities
   opps <- dbGetQuery(con, "
     SELECT t.team_name,
            g.game_id,
+           g.game_time,
            do.moneyline,
            do.implied_prob_fair,
            do.posterior_probability,
@@ -516,8 +520,9 @@ generate_dashboard_page <- function(con, iDate, iRunTime) {
     ORDER BY do.expected_value DESC
   ", params = list(as.character(iDate)))
   
-  # Get bookmaker for each opportunity
+  # Get bookmaker and bet-by time for each opportunity
   if (nrow(opps) > 0) {
+    
     opps$bookmaker <- sapply(seq_len(nrow(opps)), function(ii) {
       bm <- dbGetQuery(con, "
         SELECT b.bookmaker_name
@@ -532,6 +537,20 @@ generate_dashboard_page <- function(con, iDate, iRunTime) {
                        opps$moneyline[ii]))
       if (nrow(bm) > 0) bm$bookmaker_name[1] else "?"
     })
+    
+    opps$bet_by <- sapply(seq_len(nrow(opps)), function(ii) {
+      game_time_posix <- as.POSIXct(
+        opps$game_time[ii],
+        format = "%Y-%m-%dT%H:%M:%SZ",
+        tz = "UTC"
+      )
+      format(
+        game_time_posix - closing_window * 3600,
+        "%H:%M CDT",
+        tz = "America/Chicago"
+      )
+    })
+    
   }
   
   # Build markdown content
@@ -543,20 +562,23 @@ generate_dashboard_page <- function(con, iDate, iRunTime) {
     "\n*No positive EV opportunities identified today.*\n"
   } else {
     rows <- paste(sapply(seq_len(nrow(opps)), function(ii) {
-      sprintf("| %s | %s | %.1f%% | %.1f%% | %.1f%% | %.2f%% | %s |",
-              opps$team_name[ii],
-              ml_fmt(opps$moneyline[ii]),
-              opps$implied_prob_fair[ii] * 100,
-              opps$posterior_probability[ii] * 100,
-              opps$expected_value[ii] * 100,
-              opps$kelly_fractional[ii] * 100,
-              opps$bookmaker[ii]
+      sprintf(
+        "| %s | %s | %.1f%% | %.1f%% | %.1f%% | %.2f%% | %s | %s |",
+        opps$team_name[ii],
+        ml_fmt(opps$moneyline[ii]),
+        opps$implied_prob_fair[ii] * 100,
+        opps$posterior_probability[ii] * 100,
+        opps$expected_value[ii] * 100,
+        opps$kelly_fractional[ii] * 100,
+        opps$bet_by[ii],
+        opps$bookmaker[ii]
       )
     }), collapse = "\n")
     
     paste0(
-      "| Team | ML | Market% | Posterior% | EV% | Kelly% | Book |\n",
-      "|---|---|---|---|---|---|---|\n",
+      "| Team | ML | Market% | Posterior% |",
+      " EV% | Kelly% | Bet by | Book |\n",
+      "|---|---|---|---|---|---|---|---|\n",
       rows, "\n"
     )
   }
@@ -568,14 +590,16 @@ generate_dashboard_page <- function(con, iDate, iRunTime) {
     "permalink: /projects/portfolio-optimization/dashboard/\n",
     "---\n\n",
     "## Daily Pipeline Dashboard\n\n",
-    "**Last updated:** ", format(iRunTime, "%B %d, %Y %H:%M CDT"), "\n\n",
+    "**Last updated:** ",
+    format(iRunTime, "%B %d, %Y %H:%M CDT"), "\n\n",
     "---\n\n",
     "### Today's +EV Opportunities\n\n",
     opp_table, "\n",
     "---\n\n",
     "### Charts\n\n",
     "![Pipeline Dashboard](/assets/images/dashboard.png)\n\n",
-    "*Dashboard refreshes at 6:00am, 11:00am, 2:00pm, and 4:00pm CDT.*\n"
+    "*Dashboard refreshes at 6:00am, 11:00am, 2:00pm,",
+    " and 4:00pm CDT.*\n"
   )
   
   page_path <- file.path(
