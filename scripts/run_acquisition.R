@@ -126,6 +126,28 @@ tryCatch({
 })
 
 # -------------------------------------------------------------
+# Step 4 — Daily Opportunities
+# -------------------------------------------------------------
+
+cat(rep("-", 55), "\n", sep = "")
+cat("  STEP 4: Daily Opportunities\n")
+cat(rep("-", 55), "\n", sep = "")
+
+source(here("R", "features", "get_daily_opportunities.R"))
+
+tryCatch({
+  compute_daily_opportunities(
+    iDate  = Sys.Date(),
+    iDebug = iDebug
+  )
+}, error = function(e) {
+  cat("[ERROR] Daily opportunities failed:",
+      conditionMessage(e), "\n")
+})
+
+cat("\n")
+
+# -------------------------------------------------------------
 # Reconciliation check
 # -------------------------------------------------------------
 
