@@ -36,7 +36,6 @@ iDate <- Sys.Date()
 
 db_path <- here("db", "betting.sqlite")
 con     <- dbConnect(RSQLite::SQLite(), db_path)
-on.exit(dbDisconnect(con))
 
 # -------------------------------------------------------------
 # Panel 1 — EV Scatter Plot
@@ -495,6 +494,100 @@ build_status_panel <- function(con, iDate) {
 }
 
 # -------------------------------------------------------------
+# Generate dashboard markdown page with dynamic content
+# -------------------------------------------------------------
+
+generate_dashboard_page <- function(con, iDate, iRunTime) {
+  
+  # Fetch today's opportunities
+  opps <- dbGetQuery(con, "
+    SELECT t.team_name,
+           g.game_id,
+           do.moneyline,
+           do.implied_prob_fair,
+           do.posterior_probability,
+           do.expected_value,
+           do.kelly_fractional,
+           do.time_to_game_hours
+    FROM daily_opportunities do
+    JOIN teams t ON do.team_id  = t.team_id
+    JOIN games g ON do.game_id  = g.game_id
+    WHERE g.game_date = ?
+    ORDER BY do.expected_value DESC
+  ", params = list(as.character(iDate)))
+  
+  # Get bookmaker for each opportunity
+  if (nrow(opps) > 0) {
+    opps$bookmaker <- sapply(seq_len(nrow(opps)), function(ii) {
+      bm <- dbGetQuery(con, "
+        SELECT b.bookmaker_name
+        FROM odds_snapshots os
+        JOIN bookmakers b ON os.bookmaker_id = b.bookmaker_id
+        WHERE os.game_id = ?
+          AND (os.home_moneyline = ? OR os.away_moneyline = ?)
+        ORDER BY os.scrape_timestamp DESC
+        LIMIT 1
+      ", params = list(opps$game_id[ii],
+                       opps$moneyline[ii],
+                       opps$moneyline[ii]))
+      if (nrow(bm) > 0) bm$bookmaker_name[1] else "?"
+    })
+  }
+  
+  # Build markdown content
+  ml_fmt <- function(ml) {
+    ifelse(ml > 0, paste0("+", ml), as.character(ml))
+  }
+  
+  opp_table <- if (nrow(opps) == 0) {
+    "\n*No positive EV opportunities identified today.*\n"
+  } else {
+    rows <- paste(sapply(seq_len(nrow(opps)), function(ii) {
+      sprintf("| %s | %s | %.1f%% | %.1f%% | %.1f%% | %.2f%% | %s |",
+              opps$team_name[ii],
+              ml_fmt(opps$moneyline[ii]),
+              opps$implied_prob_fair[ii] * 100,
+              opps$posterior_probability[ii] * 100,
+              opps$expected_value[ii] * 100,
+              opps$kelly_fractional[ii] * 100,
+              opps$bookmaker[ii]
+      )
+    }), collapse = "\n")
+    
+    paste0(
+      "| Team | ML | Market% | Posterior% | EV% | Kelly% | Book |\n",
+      "|---|---|---|---|---|---|---|\n",
+      rows, "\n"
+    )
+  }
+  
+  content <- paste0(
+    "---\n",
+    "layout: page\n",
+    "title: \"\"\n",
+    "permalink: /projects/portfolio-optimization/dashboard/\n",
+    "---\n\n",
+    "## Daily Pipeline Dashboard\n\n",
+    "**Last updated:** ", format(iRunTime, "%B %d, %Y %H:%M CDT"), "\n\n",
+    "---\n\n",
+    "### Today's +EV Opportunities\n\n",
+    opp_table, "\n",
+    "---\n\n",
+    "### Charts\n\n",
+    "![Pipeline Dashboard](/assets/images/dashboard.png)\n\n",
+    "*Dashboard refreshes at 6:00am, 11:00am, 2:00pm, and 4:00pm CDT.*\n"
+  )
+  
+  page_path <- file.path(
+    site_repo,
+    "projects", "portfolio-optimization", "dashboard.md"
+  )
+  writeLines(content, page_path)
+  cat("Dashboard page updated\n")
+  
+}
+
+# -------------------------------------------------------------
 # Build and save dashboard
 # -------------------------------------------------------------
 
@@ -509,6 +602,9 @@ p2 <- build_line_movement(con, iDate)
 
 cat("Building status panel...\n")
 p3 <- build_status_panel(con, iDate)
+
+# Generate dynamic markdown page
+generate_dashboard_page(con, iDate, Sys.time())
 
 # Combine with patchwork
 dashboard <- (p1 | p2) / p3 +
@@ -549,7 +645,8 @@ cat("Pushing to GitHub Pages...\n")
 
 push_cmd <- paste0(
   "cd ", site_repo, " && ",
-  "git add assets/images/dashboard.png && ",
+  "git add assets/images/dashboard.png ",
+  "projects/portfolio-optimization/dashboard.md && ",
   "git diff --cached --quiet || ",
   "git commit -m \"Update dashboard: ",
   format(Sys.time(), "%Y-%m-%d %H:%M"), "\" && ",
@@ -558,6 +655,8 @@ push_cmd <- paste0(
 
 result <- system(push_cmd, intern = TRUE)
 cat(paste(result, collapse = "\n"), "\n")
+
+dbDisconnect(con)
 
 cat("\n=== Dashboard Complete ===\n")
 
