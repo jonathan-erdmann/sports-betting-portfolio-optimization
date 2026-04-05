@@ -170,21 +170,6 @@ get_team_abbr <- function(iCon, iTeamId) {
 }
 
 # -------------------------------------------------------------
-# Helper: build canonical game_id
-# -------------------------------------------------------------
-
-build_game_id <- function(iGameDate, iHomeAbbr, iAwayAbbr) {
-  paste0(
-    "MLB_",
-    gsub("-", "", as.character(iGameDate)),
-    "_",
-    toupper(iHomeAbbr),
-    "_",
-    toupper(iAwayAbbr)
-  )
-}
-
-# -------------------------------------------------------------
 # Helper: ensure game exists in games table
 # -------------------------------------------------------------
 

@@ -316,7 +316,7 @@ register_mlb_schedule <- function(iCon, iDate = Sys.Date(),
     home_abbr         <- get_team_abbr(iCon, home_team_id)
     away_abbr         <- get_team_abbr(iCon, away_team_id)
     canonical_game_id <- build_game_id(game_date, home_abbr,
-                                       away_abbr, game_number)
+                                       away_abbr, game_number[1])
     
     # Register game
     ensure_game(
@@ -390,7 +390,9 @@ match_game_to_registry <- function(iRegistry,
                               units = "mins")))
     })
     
-    return(candidates[[which.min(diffs)]])
+    valid <- which(!is.na(diffs))
+    if (length(valid) == 0) return(candidates[[1]])
+    return(candidates[[which.min(diffs[valid])]])
     
   }
   
