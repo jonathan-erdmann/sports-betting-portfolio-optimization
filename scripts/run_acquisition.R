@@ -3,9 +3,10 @@
 # Purpose:  Daily acquisition pipeline orchestrator.
 #           Runs all acquisition scripts in sequence:
 #           0. register_mlb_schedule — canonical game registry
-#           1. fetch_probabilities   — ESPN win probabilities
-#           2. fetch_odds            — The Odds API moneylines
-#           3. fetch_outcomes        — MLB Stats API results
+#           1. fetch_probabilities_espn — ESPN win probabilities
+#           1b. fetch_probabilities_fangraphs — FanGraphs probabilities
+#           2. fetch_odds — The Odds API moneylines
+#           3. fetch_outcomes — MLB Stats API results
 # Usage:    Rscript scripts/run_acquisition.R
 #           Rscript scripts/run_acquisition.R --debug
 # Author:   Jonathan Erdmann
@@ -30,7 +31,7 @@ iDebug <- "--debug" %in% args
 # -------------------------------------------------------------
 
 source(here("R", "acquisition", "utils.R"))
-source(here("R", "acquisition", "fetch_probabilities.R"))
+source(here("R", "acquisition", "fetch_probabilities_espn.R"))
 source(here("R", "acquisition", "fetch_odds.R"))
 source(here("R", "acquisition", "fetch_outcomes.R"))
 
@@ -87,6 +88,27 @@ tryCatch({
 }, error = function(e) {
   cat("[ERROR] Probabilities failed:",
       conditionMessage(e), "\n")
+})
+
+cat("\n")
+
+# -------------------------------------------------------------
+# Step 1b — FanGraphs Probabilities
+# -------------------------------------------------------------
+
+cat(rep("-", 55), "\n", sep = "")
+cat("  STEP 1b: FanGraphs Probabilities\n")
+cat(rep("-", 55), "\n", sep = "")
+
+source(here("R", "acquisition", "fetch_probabilities_fangraphs.R"))
+
+tryCatch({
+  fetch_and_store_fangraphs(
+    iDate  = Sys.Date(),
+    iDebug = iDebug
+  )
+}, error = function(e) {
+  cat("[ERROR] FanGraphs failed:", conditionMessage(e), "\n")
 })
 
 cat("\n")
