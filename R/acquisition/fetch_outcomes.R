@@ -275,6 +275,6 @@ fetch_and_store_outcomes <- function(iDebug = FALSE) {
 # Run if executed directly
 # -------------------------------------------------------------
 
-if (!interactive()) {
+if (sys.nframe() == 0) {
   fetch_and_store_outcomes(iDebug = FALSE)
 }

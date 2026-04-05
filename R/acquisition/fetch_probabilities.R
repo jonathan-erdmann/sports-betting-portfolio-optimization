@@ -381,7 +381,7 @@ fetch_and_store_probabilities <- function(iDate   = Sys.Date(),
 # Run if executed directly
 # -------------------------------------------------------------
 
-if (!interactive()) {
+if (sys.nframe() == 0) {
   
   # Set iDebug = FALSE to test without writing to database
   # Set iDebug = FALSE for a live run
