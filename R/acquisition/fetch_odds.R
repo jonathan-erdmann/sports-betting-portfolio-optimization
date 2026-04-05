@@ -228,7 +228,8 @@ ensure_bookmaker <- function(iCon, iKey, iTitle,
 # Main: fetch and store odds
 # -------------------------------------------------------------
 
-fetch_and_store_odds <- function(iDate  = Sys.Date(),
+fetch_and_store_odds <- function(iDate     = Sys.Date(),
+                             iRegistry = NULL,
                                  iDebug = FALSE) {
   
   cat("=== Fetching Odds API Moneylines ===\n")
@@ -287,17 +288,28 @@ fetch_and_store_odds <- function(iDate  = Sys.Date(),
       next
     }
     
-    # Build canonical game_id
-    home_abbr         <- get_team_abbr(con, home_team_id)
-    away_abbr         <- get_team_abbr(con, away_team_id)
-    canonical_game_id <- build_game_id(game_date, home_abbr, away_abbr)
-    
-    # Ensure game is registered
-    ensure_game(
-      con, canonical_game_id, game_date, game_time,
-      home_team_id, away_team_id,
-      iDebug = iDebug
-    )
+    # Match to registry for canonical game_id
+    # Registry handles doubleheader disambiguation
+    if (!is.null(iRegistry)) {
+      matched <- match_game_to_registry(
+        iRegistry, home_name, away_name, game_time
+      )
+      if (is.null(matched)) {
+        cat("  SKIPPED: game not found in registry\n")
+        next
+      }
+      canonical_game_id <- matched$game_id
+    } else {
+      home_abbr         <- get_team_abbr(con, home_team_id)
+      away_abbr         <- get_team_abbr(con, away_team_id)
+      canonical_game_id <- build_game_id(iDate, home_abbr,
+                                         away_abbr)
+      ensure_game(
+        con, canonical_game_id, iDate, game_time,
+        home_team_id, away_team_id,
+        iDebug = iDebug
+      )
+    }
     
     # Process each bookmaker
     for (jj in seq_len(nrow(bookmakers))) {

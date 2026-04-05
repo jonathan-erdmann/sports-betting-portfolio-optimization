@@ -230,11 +230,153 @@ ensure_game <- function(iCon, iGameId, iGameDate, iGameTime,
 }
 
 # -------------------------------------------------------------
+# Helper: pre-process schedule for doubleheader conflicts
+# Returns a resolved source->game_id mapping
+# -------------------------------------------------------------
+
+preprocess_schedule <- function(iCon, iSchedule, iRegistry,
+                                iDate, iDebug = FALSE) {
+  
+  # Group events by matchup
+  iSchedule$away_name <- trimws(sapply(
+    strsplit(iSchedule$name, " at "), `[[`, 1))
+  iSchedule$home_name <- trimws(sapply(
+    strsplit(iSchedule$name, " at "), `[[`, 2))
+  iSchedule$away_name <- sapply(iSchedule$away_name,
+                                clean_team_name)
+  iSchedule$home_name <- sapply(iSchedule$home_name,
+                                clean_team_name)
+  
+  resolved_map <- list()
+  processed    <- character(0)
+  
+  for (ii in seq_len(nrow(iSchedule))) {
+    
+    home_name <- iSchedule$home_name[ii]
+    away_name <- iSchedule$away_name[ii]
+    matchup   <- paste(away_name, "at", home_name)
+    
+    # Skip if already processed this matchup
+    if (matchup %in% processed) next
+    processed <- c(processed, matchup)
+    
+    # Get all source entries for this matchup
+    src_entries <- iSchedule[
+      iSchedule$home_name == home_name &
+        iSchedule$away_name == away_name, ]
+    
+    if (nrow(src_entries) == 1) {
+      
+      # Single game — standard match
+      matched <- match_game_to_registry(
+        iRegistry, home_name, away_name,
+        src_entries$date[1]
+      )
+      if (!is.null(matched)) {
+        resolved_map[[src_entries$id[1]]] <- matched$game_id
+      }
+      
+    } else {
+      
+      # Multiple entries — check for conflict
+      conflict <- detect_time_conflict(
+        iRegistry, home_name, away_name
+      )
+      
+      if (conflict && !iDebug) {
+        
+        # Build source entry list for resolver
+        src_list <- lapply(seq_len(nrow(src_entries)), function(jj) {
+          list(
+            espn_id   = src_entries$id[jj],
+            game_time = src_entries$date[jj]
+          )
+        })
+        
+        # Get registry candidates
+        reg_candidates <- Filter(function(ig) {
+          ig$home_name == home_name &&
+            ig$away_name == away_name
+        }, iRegistry)
+        
+        # Resolve interactively
+        resolution <- tryCatch({
+          resolve_doubleheader_conflict(
+            iCon, reg_candidates, src_list,
+            iDate, matchup
+          )
+        }, error = function(e) {
+          cat("  [WARN] Conflict resolution failed:",
+              conditionMessage(e), "\n")
+          cat("  Falling back to positional matching\n")
+          NULL
+        })
+        
+        if (!is.null(resolution)) {
+          for (rr in seq_along(resolution)) {
+            espn_id  <- resolution[[rr]]$source$espn_id
+            game_id  <- resolution[[rr]]$target$game_id
+            resolved_map[[espn_id]] <- game_id
+          }
+        }
+        
+      } else {
+        
+        # No conflict or debug mode — use positional matching
+        reg_candidates <- Filter(function(ig) {
+          ig$home_name == home_name &&
+            ig$away_name == away_name
+        }, iRegistry)
+        
+        # Sort both by time
+        parse_time <- function(iT) {
+          iT <- gsub("Z$", "+00:00", iT)
+          as.POSIXct(iT,
+                     format = "%Y-%m-%dT%H:%M:%S+00:00",
+                     tz = "UTC")
+        }
+        
+        src_times <- sapply(seq_len(nrow(src_entries)),
+                            function(jj) {
+                              as.numeric(parse_time(src_entries$date[jj]))
+                            })
+        reg_times <- sapply(reg_candidates,
+                            function(ig) {
+                              as.numeric(parse_time(ig$game_time))
+                            })
+        
+        src_sorted <- src_entries[order(src_times), ]
+        reg_sorted <- reg_candidates[order(reg_times)]
+        
+        for (jj in seq_len(nrow(src_sorted))) {
+          if (jj <= length(reg_sorted)) {
+            resolved_map[[src_sorted$id[jj]]] <-
+              reg_sorted[[jj]]$game_id
+            if (iDebug) {
+              cat("  [DEBUG] Positional match:",
+                  src_sorted$date[jj], "→",
+                  reg_sorted[[jj]]$game_id, "\n")
+            }
+          }
+        }
+        
+      }
+      
+    }
+    
+  }
+  
+  resolved_map
+  
+}
+
+# -------------------------------------------------------------
 # Main: fetch and store probabilities
 # -------------------------------------------------------------
 
-fetch_and_store_probabilities <- function(iDate   = Sys.Date(),
-                                          iDebug  = FALSE) {
+fetch_and_store_probabilities <- function(iDate     = Sys.Date(),
+                                          iRegistry = NULL,
+                                          iDebug    = FALSE) {
   
   cat("=== Fetching ESPN Probabilities ===\n")
   cat("Date:", as.character(iDate), "\n")
@@ -271,6 +413,14 @@ fetch_and_store_probabilities <- function(iDate   = Sys.Date(),
   results      <- list()
   games_stored <- 0
   
+  # Pre-process schedule to resolve doubleheader conflicts
+  resolved_map <- NULL
+  if (!is.null(iRegistry)) {
+    resolved_map <- preprocess_schedule(
+      con, schedule, iRegistry, iDate, iDebug
+    )
+  }  
+  
   for (ii in seq_len(nrow(schedule))) {
     
     game_id_espn <- schedule$id[ii]
@@ -302,19 +452,27 @@ fetch_and_store_probabilities <- function(iDate   = Sys.Date(),
       cat("  SKIPPED: team not found in database\n")
       next
     }
-    
-    # Get abbreviations and build canonical game_id
-    home_abbr         <- get_team_abbr(con, home_team_id)
-    away_abbr         <- get_team_abbr(con, away_team_id)
-    canonical_game_id <- build_game_id(iDate, home_abbr, away_abbr)
-    
-    # Ensure game is registered
-    ensure_game(
-      con, canonical_game_id, iDate, game_time,
-      home_team_id, away_team_id,
-      iDebug = iDebug
-    )
-    
+
+    # Match to registry using pre-processed map
+    if (!is.null(iRegistry) && !is.null(resolved_map)) {
+      espn_id <- schedule$id[ii]
+      if (!espn_id %in% names(resolved_map)) {
+        cat("  SKIPPED: not in resolved map\n")
+        next
+      }
+      canonical_game_id <- resolved_map[[espn_id]]
+    } else {
+      home_abbr         <- get_team_abbr(con, home_team_id)
+      away_abbr         <- get_team_abbr(con, away_team_id)
+      canonical_game_id <- build_game_id(iDate, home_abbr,
+                                         away_abbr)
+      ensure_game(
+        con, canonical_game_id, iDate, game_time,
+        home_team_id, away_team_id,
+        iDebug = iDebug
+      )
+    }    
+
     # Store or preview probability for each team
     for (jj in seq_len(nrow(probs))) {
       
