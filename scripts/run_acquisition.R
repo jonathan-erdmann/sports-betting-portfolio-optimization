@@ -102,3 +102,20 @@ cat(rep("*", 55), "\n", sep = "")
 cat("  PIPELINE COMPLETE\n")
 cat("  Time:", format(Sys.time(), "%H:%M:%S %Z"), "\n")
 cat(rep("*", 55), "\n\n", sep = "")
+
+# -------------------------------------------------------------
+# Reconciliation check
+# -------------------------------------------------------------
+
+cat(rep("-", 55), "\n", sep = "")
+cat("  RECONCILIATION CHECK\n")
+cat(rep("-", 55), "\n", sep = "")
+
+library(DBI)
+library(RSQLite)
+library(yaml)
+
+con <- dbConnect(RSQLite::SQLite(), here("db", "betting.sqlite"))
+check_orphaned_records(con)
+dbDisconnect(con)
+

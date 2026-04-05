@@ -11,6 +11,9 @@
 
 get_team_id <- function(iCon, iTeamName) {
   
+  # Clean team name before lookup
+  iTeamName <- clean_team_name(iTeamName)
+  
   result <- dbGetQuery(
     iCon,
     "SELECT team_id FROM teams WHERE team_name = ?",
@@ -59,11 +62,37 @@ get_bookmaker_id <- function(iCon, iBookmakerKey) {
 }
 
 # -------------------------------------------------------------
-# Helper: build canonical game_id
+# Helper: clean team name
+# Fixes issues like "Athletics Athletics" from ESPN
 # -------------------------------------------------------------
 
-build_game_id <- function(iGameDate, iHomeAbbr, iAwayAbbr) {
-  paste0(
+clean_team_name <- function(iName) {
+  
+  iName <- trimws(iName)
+  words <- strsplit(iName, " ")[[1]]
+  nn    <- length(words)
+  
+  # Check for exact word repetition in first/second half
+  if (nn %% 2 == 0) {
+    half <- nn %/% 2
+    if (identical(words[1:half], words[(half + 1):nn])) {
+      return(paste(words[1:half], collapse = " "))
+    }
+  }
+  
+  iName
+  
+}
+
+# -------------------------------------------------------------
+# Helper: build canonical game_id
+# Supports doubleheader disambiguation via iGameNumber
+# -------------------------------------------------------------
+
+build_game_id <- function(iGameDate, iHomeAbbr, iAwayAbbr,
+                          iGameNumber = 1) {
+  
+  base <- paste0(
     "MLB_",
     gsub("-", "", as.character(iGameDate)),
     "_",
@@ -71,6 +100,13 @@ build_game_id <- function(iGameDate, iHomeAbbr, iAwayAbbr) {
     "_",
     toupper(iAwayAbbr)
   )
+  
+  if (iGameNumber > 1) {
+    paste0(base, "_G", iGameNumber)
+  } else {
+    base
+  }
+  
 }
 
 # -------------------------------------------------------------
@@ -158,5 +194,61 @@ ensure_bookmaker <- function(iCon, iKey, iTitle,
   }
   
   existing$bookmaker_id[1]
+  
+}
+
+# -------------------------------------------------------------
+# Helper: reconciliation check
+# Logs any orphaned snapshots after acquisition runs
+# -------------------------------------------------------------
+
+check_orphaned_records <- function(iCon) {
+  
+  orphaned_probs <- dbGetQuery(iCon, "
+    SELECT ps.snapshot_id, ps.game_id, ps.scrape_timestamp
+    FROM probability_snapshots ps
+    LEFT JOIN games g ON ps.game_id = g.game_id
+    WHERE g.game_id IS NULL
+  ")
+  
+  orphaned_odds <- dbGetQuery(iCon, "
+    SELECT os.snapshot_id, os.game_id, os.scrape_timestamp
+    FROM odds_snapshots os
+    LEFT JOIN games g ON os.game_id = g.game_id
+    WHERE g.game_id IS NULL
+  ")
+  
+  orphaned_outcomes <- dbGetQuery(iCon, "
+    SELECT o.outcome_id, o.game_id, o.recorded_timestamp
+    FROM outcomes o
+    LEFT JOIN games g ON o.game_id = g.game_id
+    WHERE g.game_id IS NULL
+  ")
+  
+  total <- nrow(orphaned_probs) +
+           nrow(orphaned_odds)  +
+           nrow(orphaned_outcomes)
+  
+  if (total == 0) {
+    cat("  [OK] No orphaned records found\n")
+  } else {
+    if (nrow(orphaned_probs) > 0) {
+      cat("  [WARN] Orphaned probability snapshots:",
+          nrow(orphaned_probs), "\n")
+      print(orphaned_probs)
+    }
+    if (nrow(orphaned_odds) > 0) {
+      cat("  [WARN] Orphaned odds snapshots:",
+          nrow(orphaned_odds), "\n")
+      print(orphaned_odds)
+    }
+    if (nrow(orphaned_outcomes) > 0) {
+      cat("  [WARN] Orphaned outcomes:",
+          nrow(orphaned_outcomes), "\n")
+      print(orphaned_outcomes)
+    }
+  }
+  
+  invisible(total)
   
 }
