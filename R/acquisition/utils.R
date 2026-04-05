@@ -5,6 +5,8 @@
 # Author:   Jonathan Erdmann
 # =============================================================
 
+library(jsonlite)
+
 # -------------------------------------------------------------
 # Helper: resolve team_id from database
 # -------------------------------------------------------------
@@ -471,31 +473,78 @@ log_conflict <- function(iCon, iGameDate, iMatchup,
 # or NULL if skipped
 # -------------------------------------------------------------
 
+# -------------------------------------------------------------
+# Helper: human-in-the-loop doubleheader conflict resolution
+# Returns a named list mapping source entries to game_ids
+# or NULL if skipped
+# -------------------------------------------------------------
+
 resolve_doubleheader_conflict <- function(iCon,
                                           iRegistryCandidates,
                                           iSourceEntries,
                                           iGameDate,
                                           iMatchup) {
   
-  # Sort registry candidates by game time
+  # -------------------------------------------------------------
+  # Check if this conflict was already resolved previously
+  # -------------------------------------------------------------
+  
+  existing <- dbGetQuery(iCon, "
+    SELECT final_mapping, resolution
+    FROM data_conflicts
+    WHERE game_date     = ?
+      AND matchup       = ?
+      AND conflict_type = 'doubleheader_time_conflict'
+      AND resolution IN ('accepted', 'manual')
+    ORDER BY detected_timestamp DESC
+    LIMIT 1
+  ", params = list(as.character(iGameDate), iMatchup))
+  
+  if (nrow(existing) > 0) {
+    cat(sprintf("  [INFO] Reusing previous resolution (%s) for: %s\n",
+                existing$resolution[1], iMatchup))
+    
+    stored <- jsonlite::fromJSON(existing$final_mapping[1])
+    
+    recon <- lapply(seq_len(nrow(stored)), function(ii) {
+      src_match <- Filter(function(is)
+        is$espn_id == stored$espn_id[ii], iSourceEntries)
+      reg_match <- Filter(function(ig)
+        ig$game_id == stored$game_id[ii], iRegistryCandidates)
+      if (length(src_match) > 0 && length(reg_match) > 0) {
+        list(source = src_match[[1]], target = reg_match[[1]])
+      } else NULL
+    })
+    recon <- Filter(Negate(is.null), recon)
+    
+    if (length(recon) > 0) return(recon)
+    cat("  [WARN] Could not reconstruct prior mapping, re-prompting\n")
+  }
+  
+  # -------------------------------------------------------------
+  # Sort registry and source entries by time
+  # -------------------------------------------------------------
+  
   parse_time <- function(iT) {
     iT <- gsub("Z$", "+00:00", iT)
     as.POSIXct(iT, format = "%Y-%m-%dT%H:%M:%S+00:00",
                tz = "UTC")
   }
   
-  reg_times <- sapply(iRegistryCandidates,
-                      function(ig) parse_time(ig$game_time))
-  reg_order <- order(reg_times)
+  reg_times  <- sapply(iRegistryCandidates,
+                       function(ig) as.numeric(parse_time(ig$game_time)))
+  reg_order  <- order(reg_times)
   reg_sorted <- iRegistryCandidates[reg_order]
   
-  # Sort source entries by time
-  src_times <- sapply(iSourceEntries,
-                      function(is) parse_time(is$game_time))
-  src_order <- order(src_times)
+  src_times  <- sapply(iSourceEntries,
+                       function(is) as.numeric(parse_time(is$game_time)))
+  src_order  <- order(src_times)
   src_sorted <- iSourceEntries[src_order]
   
+  # -------------------------------------------------------------
   # Build proposed mapping (positional)
+  # -------------------------------------------------------------
+  
   proposed <- list()
   for (ii in seq_along(src_sorted)) {
     if (ii <= length(reg_sorted)) {
@@ -506,26 +555,35 @@ resolve_doubleheader_conflict <- function(iCon,
     }
   }
   
-  # Format times for display
-  reg_times_str <- paste(sapply(reg_sorted, function(ig) {
-    paste0("  [", which(reg_order == which(
-      sapply(iRegistryCandidates,
-             function(x) x$game_id == ig$game_id)
-    )), "] ", ig$game_id, " — ", ig$game_time)
-  }), collapse = "\n")
-  
-  src_times_str <- paste(sapply(seq_along(src_sorted),
-                                function(ii) {
-    paste0("  [", LETTERS[ii], "] ", src_sorted[[ii]]$game_time)
-  }), collapse = "\n")
-  
+  # Human-readable display string
   prop_str <- paste(sapply(seq_along(proposed), function(ii) {
-    paste0("  ", LETTERS[ii], " (", 
+    paste0("  ", LETTERS[ii], " (",
            proposed[[ii]]$source$game_time, ") → ",
            proposed[[ii]]$target$game_id)
   }), collapse = "\n")
   
-  # Display conflict
+  # Machine-readable JSON mapping
+  proposed_json <- jsonlite::toJSON(
+    lapply(proposed, function(pp) {
+      list(espn_id = pp$source$espn_id,
+           game_id = pp$target$game_id)
+    }),
+    auto_unbox = TRUE
+  )
+  
+  # -------------------------------------------------------------
+  # Display conflict prompt
+  # -------------------------------------------------------------
+  
+  reg_times_str <- paste(sapply(seq_along(reg_sorted), function(ii) {
+    paste0("  [", ii, "] ", reg_sorted[[ii]]$game_id,
+           " — ", reg_sorted[[ii]]$game_time)
+  }), collapse = "\n")
+  
+  src_times_str <- paste(sapply(seq_along(src_sorted), function(ii) {
+    paste0("  [", LETTERS[ii], "] ", src_sorted[[ii]]$game_time)
+  }), collapse = "\n")
+  
   cat("\n")
   cat(rep("!", 55), "\n", sep = "")
   cat("  DOUBLEHEADER TIME CONFLICT DETECTED\n")
@@ -544,7 +602,10 @@ resolve_doubleheader_conflict <- function(iCon,
   cat("    S — Skip this doubleheader\n")
   cat("\n  Enter choice [Y/M/S]: ")
   
-  # Check if running interactively
+  # -------------------------------------------------------------
+  # Handle non-interactive session
+  # -------------------------------------------------------------
+  
   if (!isatty(stdin())) {
     cat("S (auto-skipped — non-interactive session)\n")
     log_conflict(
@@ -554,12 +615,17 @@ resolve_doubleheader_conflict <- function(iCon,
             collapse = ", "),
       paste(sapply(src_sorted, function(is) is$game_time),
             collapse = ", "),
-      prop_str, NA,
+      as.character(proposed_json),
+      NA_character_,
       "auto_skipped", "system",
       "Non-interactive session"
     )
     return(NULL)
   }
+  
+  # -------------------------------------------------------------
+  # Read user input
+  # -------------------------------------------------------------
   
   tty    <- file("/dev/tty", open = "r", raw = TRUE)
   choice <- toupper(trimws(readLines(tty, n = 1)))
@@ -567,8 +633,6 @@ resolve_doubleheader_conflict <- function(iCon,
   
   if (choice == "Y") {
     
-    # Accept proposed mapping
-    final_str <- prop_str
     log_conflict(
       iCon, iGameDate, iMatchup,
       "doubleheader_time_conflict",
@@ -576,7 +640,8 @@ resolve_doubleheader_conflict <- function(iCon,
             collapse = ", "),
       paste(sapply(src_sorted, function(is) is$game_time),
             collapse = ", "),
-      prop_str, final_str,
+      as.character(proposed_json),
+      as.character(proposed_json),
       "accepted", "user", NULL
     )
     cat("  Accepted.\n\n")
@@ -584,7 +649,6 @@ resolve_doubleheader_conflict <- function(iCon,
     
   } else if (choice == "M") {
     
-    # Manual override
     cat("\n  Enter mapping (e.g. A1,B2) or S to skip: ")
     tty         <- file("/dev/tty", open = "r", raw = TRUE)
     mapping_str <- toupper(trimws(readLines(tty, n = 1)))
@@ -598,16 +662,16 @@ resolve_doubleheader_conflict <- function(iCon,
               collapse = ", "),
         paste(sapply(src_sorted, function(is) is$game_time),
               collapse = ", "),
-        prop_str, NA,
+        as.character(proposed_json),
+        NA_character_,
         "skipped", "user", "User skipped at manual override"
       )
       cat("  Skipped.\n\n")
       return(NULL)
     }
     
-    # Parse mapping string e.g. "A1,B2"
-    pairs    <- strsplit(mapping_str, ",")[[1]]
-    manual   <- list()
+    pairs  <- strsplit(mapping_str, ",")[[1]]
+    manual <- list()
     
     for (pp in pairs) {
       pp      <- trimws(pp)
@@ -627,10 +691,13 @@ resolve_doubleheader_conflict <- function(iCon,
       )
     }
     
-    final_str <- paste(sapply(seq_along(manual), function(ii) {
-      paste0(LETTERS[ii], " → ",
-             manual[[ii]]$target$game_id)
-    }), collapse = ", ")
+    manual_json <- jsonlite::toJSON(
+      lapply(manual, function(pp) {
+        list(espn_id = pp$source$espn_id,
+             game_id = pp$target$game_id)
+      }),
+      auto_unbox = TRUE
+    )
     
     log_conflict(
       iCon, iGameDate, iMatchup,
@@ -639,7 +706,8 @@ resolve_doubleheader_conflict <- function(iCon,
             collapse = ", "),
       paste(sapply(src_sorted, function(is) is$game_time),
             collapse = ", "),
-      prop_str, final_str,
+      as.character(proposed_json),
+      as.character(manual_json),
       "manual", "user", mapping_str
     )
     cat("  Manual mapping applied.\n\n")
@@ -647,7 +715,6 @@ resolve_doubleheader_conflict <- function(iCon,
     
   } else {
     
-    # Skip
     log_conflict(
       iCon, iGameDate, iMatchup,
       "doubleheader_time_conflict",
@@ -655,7 +722,8 @@ resolve_doubleheader_conflict <- function(iCon,
             collapse = ", "),
       paste(sapply(src_sorted, function(is) is$game_time),
             collapse = ", "),
-      prop_str, NA,
+      as.character(proposed_json),
+      NA_character_,
       "skipped", "user", NULL
     )
     cat("  Skipped.\n\n")
