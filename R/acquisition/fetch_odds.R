@@ -15,6 +15,9 @@ library(RSQLite)
 library(yaml)
 library(here)
 
+# Source shared utilities
+source(here("R", "acquisition", "utils.R"))
+
 # -------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------
