@@ -15,6 +15,7 @@ library(here)
 
 source(here("R", "features", "remove_vig.R"))
 source(here("R", "features", "get_posterior_probability.R"))
+source(here("R", "strategy", "optimize_portfolio.R"))
 
 # -------------------------------------------------------------
 # Helper: convert American moneyline to decimal odds (net)
@@ -377,8 +378,8 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
     return(invisible(NULL))
   }
   
-  # Apply exposure caps
-  opportunities <- apply_exposure_caps(opportunities, config)
+  # Apply portfolio optimization (Stage 2 Kelly constraints)
+  opportunities <- optimize_portfolio(opportunities, config, iDebug)
   
   # Sort by EV descending
   opportunities <- opportunities[
