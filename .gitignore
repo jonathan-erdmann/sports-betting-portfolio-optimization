@@ -70,3 +70,6 @@ Thumbs.db
 \n# Config file with API keys\nconfig/config.yml
 config/config.yml
 config/config.yml
+logs/*.txt
+logs/*.txt
+logs/*.log
