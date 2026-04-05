@@ -299,42 +299,28 @@ preprocess_schedule <- function(iCon, iSchedule, iRegistry,
             ig$away_name == away_name
         }, iRegistry)
         
-        # Resolve interactively
+        # Check if manual run occurred today
+        manual_run_today <- check_manual_run_today()
+        
+        # Resolve interactively if manual run, else auto-resolve
         resolution <- tryCatch({
-          resolve_doubleheader_conflict(
-            iCon, reg_candidates, src_list,
-            iDate, matchup
-          )
+          if (manual_run_today) {
+            resolve_doubleheader_conflict(
+              iCon, reg_candidates, src_list,
+              iDate, matchup
+            )
+          } else {
+            auto_resolve_doubleheader_conflict(
+              iCon, reg_candidates, src_list,
+              iDate, matchup
+            )
+          }
         }, error = function(e) {
           cat("  [WARN] Conflict resolution failed:",
               conditionMessage(e), "\n")
           cat("  Falling back to positional matching\n")
           NULL
         })
-        
-        if (!is.null(resolution)) {
-          for (rr in seq_along(resolution)) {
-            espn_id  <- resolution[[rr]]$source$espn_id
-            game_id  <- resolution[[rr]]$target$game_id
-            resolved_map[[espn_id]] <- game_id
-          }
-        }
-        
-      } else {
-        
-        # No conflict or debug mode — use positional matching
-        reg_candidates <- Filter(function(ig) {
-          ig$home_name == home_name &&
-            ig$away_name == away_name
-        }, iRegistry)
-        
-        # Sort both by time
-        parse_time <- function(iT) {
-          iT <- gsub("Z$", "+00:00", iT)
-          as.POSIXct(iT,
-                     format = "%Y-%m-%dT%H:%M:%S+00:00",
-                     tz = "UTC")
-        }
         
         src_times <- sapply(seq_len(nrow(src_entries)),
                             function(jj) {

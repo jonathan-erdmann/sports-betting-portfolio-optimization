@@ -495,7 +495,7 @@ resolve_doubleheader_conflict <- function(iCon,
     WHERE game_date     = ?
       AND matchup       = ?
       AND conflict_type = 'doubleheader_time_conflict'
-      AND resolution IN ('accepted', 'manual')
+      AND resolution IN ('accepted', 'manual', 'auto_resolved')
     ORDER BY detected_timestamp DESC
     LIMIT 1
   ", params = list(as.character(iGameDate), iMatchup))
@@ -732,3 +732,156 @@ resolve_doubleheader_conflict <- function(iCon,
   }
   
 }
+
+# -------------------------------------------------------------
+# Helper: check if a manual run occurred today
+# Reads logs/last_manual_run.txt timestamp
+# -------------------------------------------------------------
+
+check_manual_run_today <- function() {
+  
+  log_file <- here("logs", "last_manual_run.txt")
+  
+  if (!file.exists(log_file)) return(FALSE)
+  
+  last_run <- tryCatch({
+    as.Date(readLines(log_file, n = 1))
+  }, error = function(e) {
+    return(NA)
+  })
+  
+  if (is.na(last_run)) return(FALSE)
+  
+  last_run == Sys.Date()
+  
+}
+
+# -------------------------------------------------------------
+# Helper: record that a manual run occurred today
+# Writes today's date to logs/last_manual_run.txt
+# -------------------------------------------------------------
+
+record_manual_run <- function() {
+  
+  log_dir  <- here("logs")
+  log_file <- file.path(log_dir, "last_manual_run.txt")
+  
+  if (!dir.exists(log_dir)) dir.create(log_dir)
+  writeLines(as.character(Sys.Date()), log_file)
+  
+}
+
+# -------------------------------------------------------------
+# Helper: automated doubleheader conflict resolution
+# Used by cron jobs when no interactive session is available
+# Applies positional matching and logs as auto_resolved
+# -------------------------------------------------------------
+
+auto_resolve_doubleheader_conflict <- function(iCon,
+                                               iRegistryCandidates,
+                                               iSourceEntries,
+                                               iGameDate,
+                                               iMatchup) {
+  
+  # Check if already resolved today
+  existing <- dbGetQuery(iCon, "
+    SELECT final_mapping, resolution
+    FROM data_conflicts
+    WHERE game_date     = ?
+      AND matchup       = ?
+      AND conflict_type = 'doubleheader_time_conflict'
+      AND resolution IN ('accepted', 'manual', 'auto_resolved')
+    ORDER BY detected_timestamp DESC
+    LIMIT 1
+  ", params = list(as.character(iGameDate), iMatchup))
+  
+  if (nrow(existing) > 0) {
+    cat(sprintf(
+      "  [INFO] Reusing previous resolution (%s) for: %s\n",
+      existing$resolution[1], iMatchup
+    ))
+    
+    stored <- jsonlite::fromJSON(existing$final_mapping[1])
+    
+    recon <- lapply(seq_len(nrow(stored)), function(ii) {
+      src_match <- Filter(function(is)
+        is$espn_id == stored$espn_id[ii], iSourceEntries)
+      reg_match <- Filter(function(ig)
+        ig$game_id == stored$game_id[ii], iRegistryCandidates)
+      if (length(src_match) > 0 && length(reg_match) > 0) {
+        list(source = src_match[[1]], target = reg_match[[1]])
+      } else NULL
+    })
+    recon <- Filter(Negate(is.null), recon)
+    
+    if (length(recon) > 0) return(recon)
+    cat("  [WARN] Could not reconstruct prior mapping\n")
+  }
+  
+  # No prior resolution — apply positional matching
+  cat(sprintf(
+    "  [AUTO] Applying positional matching for: %s\n",
+    iMatchup
+  ))
+  
+  parse_time <- function(iT) {
+    iT <- gsub("Z$", "+00:00", iT)
+    as.POSIXct(iT, format = "%Y-%m-%dT%H:%M:%S+00:00",
+               tz = "UTC")
+  }
+  
+  reg_times  <- sapply(iRegistryCandidates,
+                       function(ig) as.numeric(parse_time(ig$game_time)))
+  reg_order  <- order(reg_times)
+  reg_sorted <- iRegistryCandidates[reg_order]
+  
+  src_times  <- sapply(iSourceEntries,
+                       function(is) as.numeric(parse_time(is$game_time)))
+  src_order  <- order(src_times)
+  src_sorted <- iSourceEntries[src_order]
+  
+  # Build positional mapping
+  mapping <- list()
+  for (ii in seq_along(src_sorted)) {
+    if (ii <= length(reg_sorted)) {
+      mapping[[ii]] <- list(
+        source = src_sorted[[ii]],
+        target = reg_sorted[[ii]]
+      )
+    }
+  }
+  
+  # Store as JSON for future reuse
+  mapping_json <- jsonlite::toJSON(
+    lapply(mapping, function(pp) {
+      list(espn_id = pp$source$espn_id,
+           game_id = pp$target$game_id)
+    }),
+    auto_unbox = TRUE
+  )
+  
+  prop_str <- paste(sapply(seq_along(mapping), function(ii) {
+    paste0("  ", LETTERS[ii], " (",
+           mapping[[ii]]$source$game_time, ") → ",
+           mapping[[ii]]$target$game_id)
+  }), collapse = "\n")
+  
+  log_conflict(
+    iCon, iGameDate, iMatchup,
+    "doubleheader_time_conflict",
+    paste(sapply(reg_sorted, function(ig) ig$game_time),
+          collapse = ", "),
+    paste(sapply(src_sorted, function(is) is$game_time),
+          collapse = ", "),
+    as.character(mapping_json),
+    as.character(mapping_json),
+    "auto_resolved", "system",
+    "Positional matching applied by automated pipeline"
+  )
+  
+  cat(sprintf("  [AUTO] Resolved:\n%s\n", prop_str))
+  
+  mapping
+  
+}
+
