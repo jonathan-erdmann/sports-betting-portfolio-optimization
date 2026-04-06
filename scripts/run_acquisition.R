@@ -148,6 +148,25 @@ tryCatch({
 })
 
 # -------------------------------------------------------------
+# Step 3b — Update Confidence Weights
+# -------------------------------------------------------------
+
+cat(rep("-", 55), "\n", sep = "")
+cat("  STEP 3b: Update Confidence Weights\n")
+cat(rep("-", 55), "\n", sep = "")
+
+source(here("R", "features", "update_confidence_weights.R"))
+
+tryCatch({
+  update_confidence_weights(iDebug = iDebug)
+}, error = function(e) {
+  cat("[ERROR] Confidence weights failed:",
+      conditionMessage(e), "\n")
+})
+
+cat("\n")
+
+# -------------------------------------------------------------
 # Step 4 — Daily Opportunities
 # -------------------------------------------------------------
 
