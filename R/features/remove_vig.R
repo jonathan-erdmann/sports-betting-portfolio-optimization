@@ -88,14 +88,23 @@ get_consensus_fair_prob <- function(iCon, iGameId,
       game_time, scrape_times, units = "hours"
     ))
     
-    # Keep snapshots within closing window and before game
-    in_window <- hours_before >= 0 &
-      hours_before <= iClosingWindowHours
+    # Always restrict to pre-game snapshots first
+    pre_game <- hours_before >= 0
+    if (any(pre_game)) {
+      snapshots <- snapshots[pre_game, ]
+    } else {
+      # No pre-game snapshots available
+      return(NULL)
+    }
     
+    # Apply closing window if snapshots exist within it
+    hours_before <- hours_before[pre_game]
+    in_window    <- hours_before <= iClosingWindowHours
     if (any(in_window)) {
       snapshots <- snapshots[in_window, ]
     }
-    # If no snapshots in window, use all available
+    # If no snapshots in closing window, use all pre-game
+    # snapshots (morning line is better than in-game line)
     
   }
   
