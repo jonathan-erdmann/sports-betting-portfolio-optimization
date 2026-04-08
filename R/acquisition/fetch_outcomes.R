@@ -261,8 +261,10 @@ fetch_and_store_outcomes <- function(iDebug = FALSE) {
       # Build canonical game_id
       home_abbr         <- get_team_abbr(con, home_team_id)
       away_abbr         <- get_team_abbr(con, away_team_id)
+      game_number       <- games$gameNumber[jj]
       canonical_game_id <- build_game_id(game_date,
-                                         home_abbr, away_abbr)
+                                         home_abbr, away_abbr,
+                                         game_number)
       
       # Check if this game is pending in our database
       pending <- dbGetQuery(con, "
