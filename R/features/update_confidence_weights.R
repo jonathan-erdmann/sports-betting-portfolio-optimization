@@ -135,10 +135,9 @@ compute_raw_weight <- function(iBrierSource, iBrierMarket,
   
   raw <- 1 - (iBrierSource / iBrierMarket)
   
-  # Clip to reasonable range
-  # Upper bound: 2x prior (don't over-trust any single source)
-  # Lower bound: 0 (never negative weight)
-  max(0, min(iPriorWeight * 2, raw))
+  # Floor at prior/2 — never fully exclude a source
+  # Ceiling at prior*2 — never over-trust any source
+  max(iPriorWeight / 2, min(iPriorWeight * 2, raw))
   
 }
 

@@ -84,7 +84,7 @@ get_pending_dates <- function(iCon) {
     FROM games g
     LEFT JOIN outcomes o ON g.game_id = o.game_id
     WHERE o.outcome_id IS NULL
-      AND g.status NOT IN ('final', 'in_progress')
+      AND g.status NOT IN ('final')
       AND g.game_date <= DATE('now', 'localtime')
     ORDER BY g.game_date
   ")
@@ -271,7 +271,7 @@ fetch_and_store_outcomes <- function(iDebug = FALSE) {
         LEFT JOIN outcomes o ON g.game_id = o.game_id
         WHERE g.game_id = ?
           AND o.outcome_id IS NULL
-          AND g.status = 'scheduled'
+          AND g.status in ('scheduled','in_progress')
       ", params = list(canonical_game_id))
       
       if (nrow(pending) == 0) {

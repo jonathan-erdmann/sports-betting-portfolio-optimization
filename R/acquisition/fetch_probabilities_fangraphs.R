@@ -25,10 +25,13 @@ config     <- yaml::read_yaml(here("config", "config.yml"))
 user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 fg_headers <- add_headers(
   "User-Agent"      = user_agent,
-  "Referer"         = "https://www.fangraphs.com/standings/playoff-odds",
+  "Referer"         = "https://www.fangraphs.com/scores",
   "Accept"          = "application/json, text/plain, */*",
   "Accept-Language" = "en-US,en;q=0.9",
-  "Origin"          = "https://www.fangraphs.com"
+  "Origin"          = "https://www.fangraphs.com",
+  "sec-fetch-site"  = "same-origin",
+  "sec-fetch-mode"  = "cors",
+  "sec-fetch-dest"  = "empty"
 )
 
 # -------------------------------------------------------------
