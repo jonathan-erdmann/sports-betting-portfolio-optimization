@@ -114,6 +114,28 @@ tryCatch({
 cat("\n")
 
 # -------------------------------------------------------------
+# Step 1c — Elo Model Probabilities
+# -------------------------------------------------------------
+
+cat(rep("-", 55), "\n", sep = "")
+cat("  STEP 1c: Elo Model Probabilities\n")
+cat(rep("-", 55), "\n", sep = "")
+
+source(here("R", "models", "elo_model.R"))
+
+tryCatch({
+  run_elo_model(
+    iDate        = Sys.Date(),
+    iDebug       = iDebug,
+    iForceReinit = FALSE
+  )
+}, error = function(e) {
+  cat("[ERROR] Elo model failed:", conditionMessage(e), "\n")
+})
+
+cat("\n")
+
+# -------------------------------------------------------------
 # Step 2 — Odds
 # -------------------------------------------------------------
 
