@@ -80,7 +80,7 @@ fetch_season_schedule <- function(iStartDate, iEndDate,
     "&startDate=", format(as.Date(iStartDate), "%Y-%m-%d"),
     "&endDate=",   format(as.Date(iEndDate),   "%Y-%m-%d"),
     "&hydrate=decisions,linescore",
-	paste0("&gameType=", iGameType)
+	"&gameType=", iGameType
   )
 
   if (iDebug) cat(sprintf("  [API] schedule %s to %s\n",
@@ -152,33 +152,6 @@ fetch_season_schedule <- function(iStartDate, iEndDate,
       )
     }
   }
-
-  # Fetch 2025 playoffs with reduced K-factor
-  cat("  Fetching 2025 playoffs ...\n")
-  playoff_chunk <- fetch_season_schedule(
-    season_end,
-    iConfig$elo$season_end_2025_playoffs,
-    iGameType = "P",
-    iDebug    = iDebug
-  )
-  if (is.null(playoff_chunk)) {
-    Sys.sleep(2)
-    playoff_chunk <- fetch_season_schedule(
-      season_end,
-      iConfig$elo$season_end_2025_playoffs,
-      iGameType = "P",
-      iDebug    = iDebug
-    )
-  }
-  if (!is.null(playoff_chunk) && nrow(playoff_chunk) > 0) {
-    cat(sprintf("  Playoff games found: %d\n", nrow(playoff_chunk)))
-    playoff_chunk$is_playoff <- TRUE
-    all_games[[length(all_games) + 1]] <- playoff_chunk
-    total_fetched <- total_fetched + nrow(playoff_chunk)
-  } else {
-    cat("  No playoff games found or API error\n")
-  }
-
   if (length(game_rows) == 0) return(NULL)
 
   result <- do.call(rbind, game_rows)
@@ -515,25 +488,61 @@ initialize_elo_2025 <- function(iCon, iConfig, iDebug = FALSE) {
     rng <- month_ranges[[ii]]
     cat(sprintf("  Fetching %s to %s ...", rng$start, rng$end))
 
-    chunk <- fetch_season_schedule(rng$start, rng$end, iDebug)
+    chunk <- fetch_season_schedule(rng$start, rng$end, iGameType = "R", iDebug)
 
     # Retry once on failure
     if (is.null(chunk)) {
       cat(" retry...")
       Sys.sleep(2)
-      chunk <- fetch_season_schedule(rng$start, rng$end, iDebug)
+      chunk <- fetch_season_schedule(rng$start, rng$end, iGameType = "R", iDebug)
     }
 
     if (!is.null(chunk)) {
       cat(sprintf(" %d games\n", nrow(chunk)))
+      chunk$is_playoff <- FALSE
       all_games[[length(all_games) + 1]] <- chunk
       total_fetched <- total_fetched + nrow(chunk)
+      Sys.sleep(3)
     } else {
       warning("Failed to fetch schedule: ", rng$start,
               " - ", rng$end)
       cat(" SKIPPED (API error)\n")
     }
   }
+  # Fetch 2025 playoffs with reduced K-factor
+  # gameType codes: F=Wild Card, D=Division, L=League CS, W=World Series
+  playoff_types <- c("F", "D", "L", "W")
+  playoff_start <- iConfig$elo$season_end_2025
+  playoff_end   <- iConfig$elo$season_end_2025_playoffs
+  total_playoff <- 0L
+
+  for (pt in playoff_types) {
+    cat(sprintf("  Fetching 2025 playoffs (gameType=%s) ...", pt))
+    pt_chunk <- fetch_season_schedule(
+      playoff_start, playoff_end,
+      iGameType = pt,
+      iDebug    = iDebug
+    )
+    if (is.null(pt_chunk)) {
+      Sys.sleep(2)
+      pt_chunk <- fetch_season_schedule(
+        playoff_start, playoff_end,
+        iGameType = pt,
+        iDebug    = iDebug
+      )
+    }
+    if (!is.null(pt_chunk) && nrow(pt_chunk) > 0) {
+      cat(sprintf(" %d games\n", nrow(pt_chunk)))
+      pt_chunk$is_playoff <- TRUE
+      all_games[[length(all_games) + 1]] <- pt_chunk
+      total_fetched <- total_fetched + nrow(pt_chunk)
+      total_playoff <- total_playoff + nrow(pt_chunk)
+    } else {
+      cat(" 0 games\n")
+    }
+  }
+  cat(sprintf("  Total playoff games: %d\n", total_playoff))
+
 
   if (length(all_games) == 0) {
     warning("No 2025 data — storing default ratings")
