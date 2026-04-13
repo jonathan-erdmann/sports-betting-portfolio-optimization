@@ -233,15 +233,6 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
     return(invisible(NULL))
   }
   
-  # Get confidence weights per source
-  weights <- list()
-  for (ss in seq_len(nrow(sources))) {
-    ww <- get_confidence_weight(
-      con, sources$source_id[ss], config
-    )
-    weights[[sources$source_id[ss]]] <- ww$weight
-  }
-  
   scrape_timestamp <- format(
     Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"
   )
@@ -300,43 +291,12 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
       moneyline <- best_line$moneyline
       net_odds  <- ml_to_decimal(moneyline)
       
-      # Get source probabilities and compute posterior
-      # Use best available source (highest weight with data)
-      best_source_id   <- NA_integer_
-      best_source_prob <- NA_real_
-      best_weight      <- 0
-      
-      for (ss in seq_len(nrow(sources))) {
-        
-        source_id <- sources$source_id[ss]
-        
-        src_prob <- dbGetQuery(con, "
-          SELECT win_probability
-          FROM probability_snapshots
-          WHERE game_id   = ?
-            AND team_id   = ?
-            AND source_id = ?
-          ORDER BY scrape_timestamp DESC
-          LIMIT 1
-        ", params = list(game_id, sd$team_id, source_id))
-        
-        if (nrow(src_prob) == 0) next
-        
-        ww <- weights[[source_id]]
-        if (ww > best_weight || is.na(best_source_prob)) {
-          best_source_id   <- source_id
-          best_source_prob <- src_prob$win_probability[1]
-          best_weight      <- ww
-        }
-        
-      }
-      
-      if (is.na(best_source_prob)) next
-      
-      # Compute posterior probability
+      # Compute posterior probability (multi-source weighted blend)
       posterior <- get_posterior(
-        best_source_prob, sd$mkt_prob, best_weight
+        con, game_id, sd$team_id, sd$mkt_prob
       )
+
+      if (is.na(posterior)) next
       
       # Compute EV and Kelly
       ev            <- compute_ev(posterior, net_odds)
@@ -354,9 +314,9 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
         moneyline             = as.integer(moneyline),
         implied_prob_raw      = ml_to_implied(moneyline),
         implied_prob_fair     = sd$mkt_prob,
-        source_id             = best_source_id,
-        source_probability    = best_source_prob,
-        confidence_weight     = best_weight,
+        source_id             = NA_integer_,
+        source_probability    = NA_real_,
+        confidence_weight     = NA_real_,
         posterior_probability = posterior,
         expected_value        = ev,
         kelly_full            = kelly_full,
@@ -385,7 +345,20 @@ compute_daily_opportunities <- function(iDate  = Sys.Date(),
   opportunities <- opportunities[
     order(-opportunities$expected_value), ]
   
+  # Build source blend display string
+  src_weights <- get_source_weights(con, sources$source_id)
+  blend_parts <- vapply(seq_len(nrow(sources)), function(ii) {
+    sid  <- as.character(sources$source_id[ii])
+    abbr <- substr(sources$source_name[ii], 1, 6)
+    ww   <- if (sid %in% names(src_weights)) src_weights[[sid]] else 0
+    sprintf("%s(%.2f)", abbr, ww)
+  }, character(1))
+  w_market  <- max(0, 1 - sum(src_weights))
+  blend_str <- paste(c(blend_parts, sprintf("Market(%.2f)", w_market)),
+                     collapse = " | ")
+
   # Print summary
+  cat(sprintf("Sources: %s\n\n", blend_str))
   cat(sprintf("%-25s  %-6s  %-6s  %-6s  %-6s  %-6s  %-18s  %s\n",
               "Game/Team", "ML", "Mkt%", "Post%", "EV%",
               "Kelly%", "Bet by", "Book"))

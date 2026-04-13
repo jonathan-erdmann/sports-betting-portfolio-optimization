@@ -73,3 +73,5 @@ config/config.yml
 logs/*.txt
 logs/*.txt
 logs/*.log
+Rplots.pdf
+plots/
