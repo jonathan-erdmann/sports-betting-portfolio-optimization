@@ -351,6 +351,78 @@ register_mlb_schedule <- function(iCon, iDate = Sys.Date(),
 }
 
 # -------------------------------------------------------------
+# Helper: register MLB schedule for next N days and fetch
+# opening odds for any newly registered future games
+# -------------------------------------------------------------
+register_mlb_schedule_lookahead <- function(iCon,
+                                             iDays    = 7,
+                                             iDebug   = FALSE) {
+  today      <- Sys.Date()
+  dates      <- today + seq_len(iDays)
+  new_games  <- 0L
+
+  for (dd in dates) {
+    iDate <- as.Date(dd, origin = "1970-01-01")
+
+    # Check how many games already registered for this date
+    existing <- dbGetQuery(iCon, "
+      SELECT COUNT(*) AS n FROM games
+      WHERE game_date = ?
+    ", params = list(format(iDate, "%Y-%m-%d")))$n[1]
+
+    # Fetch schedule from MLB Stats API
+    url <- paste0(
+      "https://statsapi.mlb.com/api/v1/schedule",
+      "?sportId=1",
+      "&date=", format(iDate, "%Y-%m-%d")
+    )
+    resp <- tryCatch(
+      GET(url, add_headers("User-Agent" = "Mozilla/5.0")),
+      error = function(e) NULL
+    )
+    if (is.null(resp) || status_code(resp) != 200) {
+      cat(sprintf("  [WARN] Schedule fetch failed for %s\n",
+                  format(iDate, "%Y-%m-%d")))
+      next
+    }
+    parsed <- tryCatch(
+      fromJSON(content(resp, as = "text", encoding = "UTF-8"),
+               flatten = TRUE),
+      error = function(e) NULL
+    )
+    if (is.null(parsed) || parsed$totalGames == 0) next
+
+    expected <- parsed$totalGames
+
+    # Skip if already fully registered
+    if (existing >= expected) {
+      if (iDebug) {
+        cat(sprintf("  [SKIP] %s — %d games already registered\n",
+                    format(iDate, "%Y-%m-%d"), existing))
+      }
+      next
+    }
+
+    # Register any missing games
+    cat(sprintf("  Registering %s ...", format(iDate, "%Y-%m-%d")))
+    tryCatch({
+      register_mlb_schedule(iCon, iDate, iDebug)
+      new_games <- new_games + (expected - existing)
+    }, error = function(e) {
+      cat(sprintf(" [ERROR] %s\n", conditionMessage(e)))
+    })
+
+    Sys.sleep(0.5)
+  }
+
+  cat(sprintf("  Lookahead complete — %d new games registered",
+              new_games),
+      sprintf("across next %d days\n", iDays))
+  invisible(new_games)
+}
+
+
+# -------------------------------------------------------------
 # Helper: match a game to the registry by time proximity
 # Used to link ESPN and Odds API records to canonical game IDs
 # -------------------------------------------------------------

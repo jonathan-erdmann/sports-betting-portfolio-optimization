@@ -72,6 +72,71 @@ dbDisconnect(con)
 cat("\n")
 
 # -------------------------------------------------------------
+# -------------------------------------------------------------
+# Step 0b — Register upcoming games (7-day lookahead)
+#           and fetch opening odds for newly registered games
+# -------------------------------------------------------------
+cat(rep("-", 55), "\n", sep = "")
+cat("  STEP 0b: Register Upcoming Schedule (7-day lookahead)\n")
+cat(rep("-", 55), "\n", sep = "")
+con <- dbConnect(RSQLite::SQLite(), here("db", "betting.sqlite"))
+dbExecute(con, "PRAGMA foreign_keys = ON")
+tryCatch({
+  register_mlb_schedule_lookahead(
+    iCon   = con,
+    iDays  = 7,
+    iDebug = iDebug
+  )
+}, error = function(e) {
+  cat("[ERROR] Lookahead registration failed:",
+      conditionMessage(e), "\n")
+})
+dbDisconnect(con)
+
+# Fetch opening odds for upcoming games
+cat("  Fetching opening odds for upcoming games...\n")
+for (dd in as.character(Sys.Date() + seq_len(7))) {
+  future_date <- as.Date(dd)
+  tryCatch({
+    future_con <- dbConnect(RSQLite::SQLite(),
+                            here("db", "betting.sqlite"))
+    future_registry <- tryCatch(
+      dbGetQuery(future_con, "
+        SELECT g.game_id, g.game_time,
+               th.team_name AS home_name,
+               ta.team_name AS away_name
+        FROM games g
+        JOIN teams th ON g.home_team_id = th.team_id
+        JOIN teams ta ON g.away_team_id = ta.team_id
+        WHERE g.game_date = ?
+      ", params = list(dd)),
+      error = function(e) NULL
+    )
+    dbDisconnect(future_con)
+    if (!is.null(future_registry) && nrow(future_registry) > 0) {
+      reg_list <- lapply(seq_len(nrow(future_registry)), function(ii) {
+        list(
+          game_id   = future_registry$game_id[ii],
+          home_name = future_registry$home_name[ii],
+          away_name = future_registry$away_name[ii],
+          game_time = future_registry$game_time[ii]
+        )
+      })
+      fetch_and_store_odds(
+        iDate     = future_date,
+        iRegistry = reg_list,
+        iDebug    = FALSE
+      )
+      cat(sprintf("  Odds snapshot stored for %s\n", dd))
+      Sys.sleep(1)
+    }
+  }, error = function(e) {
+    cat(sprintf("  [WARN] Odds fetch failed for %s: %s\n",
+                dd, conditionMessage(e)))
+  })
+}
+
+# -------------------------------------------------------------
 # Step 1 — Probabilities
 # -------------------------------------------------------------
 
