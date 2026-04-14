@@ -653,9 +653,9 @@ if (!dir.exists(output_dir)) {
 ggsave(
   filename = output_file,
   plot     = dashboard,
-  width    = 16,
-  height   = 10,
-  dpi      = 150,
+  width    = 10,
+  height   = 6,
+  dpi      = 96,
   bg       = "white"
 )
 
