@@ -367,7 +367,7 @@ fetch_and_store_probabilities <- function(iDate     = Sys.Date(),
   source_id <- dbGetQuery(
     con,
     "SELECT source_id FROM probability_sources
-     WHERE source_name = 'ESPN Analytics'"
+     WHERE source_name = 'ESPN Analytics - MLB'"
   )$source_id
   
   if (length(source_id) == 0 || is.na(source_id)) {
@@ -412,8 +412,8 @@ fetch_and_store_probabilities <- function(iDate     = Sys.Date(),
     
     # Parse team names from game name
     teams     <- strsplit(game_name, " at ")[[1]]
-    away_name <- trimws(teams[1])
-    home_name <- trimws(teams[2])
+    away_name <- clean_team_name(trimws(teams[1]))
+    home_name <- clean_team_name(trimws(teams[2]))
     
     # Resolve team IDs
     home_team_id <- get_team_id(con, home_name)
